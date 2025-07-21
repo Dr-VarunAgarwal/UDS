@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Urodynamics Simulator with EMG</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f9fa;
+        }
+        .control-panel button {
+            transition: all 0.2s ease-in-out;
+        }
+        .control-panel button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .control-panel button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: translateY(0);
+            box-shadow: none;
+        }
+        .sensation-button:hover {
+             background-color: #e2e8f0;
+        }
+        #tooltip {
+            position: absolute;
+            display: none;
+            background-color: #1a202c;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            pointer-events: none;
+            max-width: 250px;
+            line-height: 1.4;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+        #tooltip strong {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 16px;
+            color: #63b3ed;
+        }
+        .interactive-svg {
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .interactive-svg:hover {
+            filter: drop-shadow(0px 0px 4px rgba(59, 130, 246, 0.7));
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-700">Interactive Urodynamics Simulator</h1>
+            <p class="text-md text-gray-500 mt-2">A tool for visualizing a complete filling and voiding cystometry study with EMG.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Left Column: Controls and Data -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Control Panel -->
+                <div class="bg-white p-5 rounded-lg shadow-md">
+                    <h2 class="text-xl font-bold mb-4 border-b pb-2 text-gray-600">Controls</h2>
+                    <div class="grid grid-cols-2 gap-3 control-panel">
+                        <button id="start-filling" class="w-full bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-blue-600">Start Filling</button>
+                        <button id="stop-filling" class="w-full bg-yellow-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-yellow-600" disabled>Stop Filling</button>
+                        <button id="start-voiding" class="w-full bg-green-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-green-600" disabled>Start Voiding</button>
+                        <button id="reset-sim" class="w-full bg-red-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-red-600">Reset</button>
+                        <button id="cough-btn" class="col-span-2 w-full bg-indigo-500 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-indigo-600" disabled>Simulate Cough</button>
+                    </div>
+                </div>
+
+                <!-- Sensation Logger -->
+                <div class="bg-white p-5 rounded-lg shadow-md">
+                    <h2 class="text-xl font-bold mb-4 border-b pb-2 text-gray-600">Patient Sensation</h2>
+                    <div class="space-y-2">
+                         <button id="sensation-first" class="w-full text-left p-3 rounded-md sensation-button" disabled>First Sensation of Filling</button>
+                         <button id="sensation-desire" class="w-full text-left p-3 rounded-md sensation-button" disabled>First Desire to Void</button>
+                         <button id="sensation-strong" class="w-full text-left p-3 rounded-md sensation-button" disabled>Strong Desire to Void</button>
+                    </div>
+                </div>
+                
+                <!-- Results Panel -->
+                <div class="bg-white p-5 rounded-lg shadow-md">
+                    <h2 class="text-xl font-bold mb-4 border-b pb-2 text-gray-600">Results</h2>
+                    <div id="results-panel" class="space-y-2 text-sm">
+                        <p><strong>Cystometric Capacity:</strong> <span id="res-capacity">--</span> ml</p>
+                        <p><strong>Max Flow Rate (Qmax):</strong> <span id="res-qmax">--</span> ml/s</p>
+                        <p><strong>Pdet at Qmax:</strong> <span id="res-pdet-qmax">--</span> cmH₂O</p>
+                        <p><strong>Post-Void Residual (PVR):</strong> <span id="res-pvr">--</span> ml</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Chart -->
+            <div class="lg:col-span-2 bg-white p-2 md:p-4 rounded-lg shadow-lg">
+                <canvas id="urodynamics-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Interactive Diagram Section -->
+        <div class="mt-8 bg-white p-5 rounded-lg shadow-md">
+            <h2 class="text-xl font-bold mb-4 border-b pb-2 text-gray-600">Equipment Setup</h2>
+            <div id="urodynamics-container" class="relative">
+                <svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Floor -->
+                    <rect x="0" y="450" width="800" height="50" fill="#e2e8f0" />
+                    
+                    <!-- Urodynamics Machine/Monitor (Moved to Left) -->
+                    <rect id="monitor" class="interactive-svg" x="20" y="150" width="180" height="120" fill="#2d3748" stroke="#1a202c" stroke-width="2"/>
+                    <rect x="60" y="270" width="100" height="180" fill="#a0aec0"/>
+                    <!-- Monitor Screen Content -->
+                    <path d="M 30 180 q 30 -20, 60 0 t 60 0" stroke="#68d391" fill="none" stroke-width="2"/>
+                    <path d="M 30 210 q 30 10, 60 0 t 60 0" stroke="#f56565" fill="none" stroke-width="2"/>
+                    <path d="M 30 240 q 30 -30, 60 -10 t 60 5" stroke="#4299e1" fill="none" stroke-width="2"/>
+
+                    <!-- Patient Figure -->
+                    <path d="M 350 250 C 350 200, 400 200, 400 250 L 400 380 L 350 380 Z" fill="#cbd5e1" />
+                    <circle cx="375" cy="180" r="30" fill="#cbd5e1" />
+
+                    <!-- Urodynamics Commode -->
+                    <rect id="commode" class="interactive-svg" x="300" y="380" width="150" height="70" fill="#a0aec0" stroke="#4a5568" stroke-width="2"/>
+                    <path id="uroflowmeter" class="interactive-svg" d="M 350 450 L 370 470 L 400 470 L 420 450 Z" fill="#68d391" stroke="#2f855a" stroke-width="2"/>
+                    <path d="M 375 420 L 375 450" stroke="#4a5568" stroke-width="1"/>
+
+                    <!-- Catheters and Wires -->
+                    <path id="bladder-catheter" class="interactive-svg" d="M 375 350 C 300 350, 250 300, 200 300" stroke="#f56565" fill="none" stroke-width="3" stroke-dasharray="5,3" />
+                    <path id="rectal-catheter" class="interactive-svg" d="M 365 370 C 300 380, 250 390, 200 390" stroke="#4299e1" fill="none" stroke-width="3" stroke-dasharray="5,3" />
+                    <path id="emg-wire" class="interactive-svg" d="M 375 400 C 325 410, 250 410, 200 410" stroke="white" stroke-width="4" />
+                    <path d="M 375 400 C 325 410, 250 410, 200 410" stroke="#4a5568" stroke-width="1" fill="none" stroke-dasharray="4,4" />
+
+                    <!-- Transducers -->
+                    <rect x="190" y="250" width="30" height="80" fill="#a0aec0" /> <!-- Stand -->
+                    <rect id="transducers" class="interactive-svg" x="170" y="315" width="70" height="25" fill="#faf089" stroke="#b7791f" stroke-width="2"/>
+                    <path d="M 200 300 L 205 315" stroke="#f56565" fill="none" stroke-width="2"/>
+                    <path d="M 200 390 L 205 340" stroke="#4299e1" fill="none" stroke-width="2"/>
+                    
+                    <!-- IV Pole and Pump (Moved to Right) -->
+                    <rect x="650" y="100" width="10" height="350" fill="#a0aec0" />
+                    <path d="M 630 100 L 690 100" stroke="#a0aec0" stroke-width="4" />
+                    <rect id="saline-bag" class="interactive-svg" x="670" y="100" width="40" height="60" fill="#bee3f8" stroke="#4299e1" stroke-width="2"/>
+                    <rect id="infusion-pump" class="interactive-svg" x="635" y="250" width="40" height="40" fill="#718096" stroke="#2d3748" stroke-width="2"/>
+                    <path d="M 680 160 Q 680 200, 655 250" stroke="#4299e1" fill="none" stroke-width="2"/>
+                    <path d="M 655 290 Q 600 300, 500 310 C 400 320, 230 310, 200 300" stroke="#4299e1" fill="none" stroke-width="2"/>
+                    
+                    <!-- Connection to monitor -->
+                    <path d="M 190 315 L 160 315 L 160 270" stroke="#4a5568" fill="none" stroke-width="3" />
+                </svg>
+                <div id="tooltip"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- DOM ELEMENT SELECTION ---
+        const canvas = document.getElementById('urodynamics-chart');
+        const ctx = canvas.getContext('2d');
+        const startFillingBtn = document.getElementById('start-filling');
+        const stopFillingBtn = document.getElementById('stop-filling');
+        const startVoidingBtn = document.getElementById('start-voiding');
+        const resetBtn = document.getElementById('reset-sim');
+        const coughBtn = document.getElementById('cough-btn');
+        const sensationBtns = {
+            first: document.getElementById('sensation-first'),
+            desire: document.getElementById('sensation-desire'),
+            strong: document.getElementById('sensation-strong')
+        };
+        const results = {
+            capacity: document.getElementById('res-capacity'),
+            qmax: document.getElementById('res-qmax'),
+            pdet_qmax: document.getElementById('res-pdet-qmax'),
+            pvr: document.getElementById('res-pvr')
+        };
+
+        // --- SIMULATION STATE & PARAMETERS ---
+        let simState = {
+            isFilling: false,
+            isVoiding: false,
+            isPaused: false,
+            time: 0,
+            volume: 0,
+            pAbd: 15,
+            pDet: 5,
+            flow: 0,
+            emg: 10,
+            fillingRate: 50 / 60, // ml per second
+            lastTime: 0,
+            coughTime: -1,
+            sensationEvents: []
+        };
+        
+        let chartData = {
+            volume: [], pVes: [], pAbd: [], pDet: [], flow: [], emg: []
+        };
+
+        let calculatedResults = {
+            capacity: 0, qmax: 0, pdet_qmax: 0, pvr: 0
+        };
+
+        // --- CHART CONFIGURATION ---
+        const chartConfig = {
+            padding: 60,
+            yAxes: [
+                { label: 'Volume (ml)', color: '#4A5568', max: 600 },
+                { label: 'Pressure (cmH₂O)', color: '#C53030', max: 150 },
+                { label: 'Flow (ml/s)', color: '#2F855A', max: 50 },
+                { label: 'EMG (μV)', color: '#1A202C', max: 100 }
+            ],
+            channels: [
+                { key: 'volume', color: '#A0AEC0', yAxis: 0 },
+                { key: 'pVes', color: '#F56565', yAxis: 1 },
+                { key: 'pAbd', color: '#4299E1', yAxis: 1 },
+                { key: 'pDet', color: '#ED8936', yAxis: 1 },
+                { key: 'flow', color: '#48BB78', yAxis: 2 },
+                { key: 'emg', color: '#2D3748', yAxis: 3 }
+            ]
+        };
+
+        // --- UI & CONTROL LOGIC ---
+        function updateButtonStates() {
+            startFillingBtn.disabled = simState.isFilling || simState.volume > 0;
+            stopFillingBtn.disabled = !simState.isFilling;
+            startVoidingBtn.disabled = simState.isFilling || simState.isVoiding || simState.volume === 0;
+            coughBtn.disabled = !simState.isFilling && !simState.isVoiding;
+            Object.values(sensationBtns).forEach(btn => btn.disabled = !simState.isFilling);
+        }
+
+        function resetSimulation() {
+            simState = { ...simState, isFilling: false, isVoiding: false, time: 0, volume: 0, pAbd: 15, pDet: 5, flow: 0, emg: 10, lastTime: 0, coughTime: -1, sensationEvents: [] };
+            chartData = { volume: [], pVes: [], pAbd: [], pDet: [], flow: [], emg: [] };
+            calculatedResults = { capacity: 0, qmax: 0, pdet_qmax: 0, pvr: 0 };
+            
+            Object.values(results).forEach(el => el.textContent = '--');
+            Object.values(sensationBtns).forEach(btn => {
+                btn.style.fontWeight = 'normal';
+                btn.disabled = true;
+            });
+            
+            updateButtonStates();
+            drawChart();
+        }
+
+        // --- EVENT LISTENERS ---
+        startFillingBtn.addEventListener('click', () => {
+            simState.isFilling = true;
+            simState.isPaused = false;
+            simState.lastTime = performance.now();
+            updateButtonStates();
+            requestAnimationFrame(gameLoop);
+        });
+
+        stopFillingBtn.addEventListener('click', () => {
+            simState.isFilling = false;
+            simState.isPaused = true;
+            calculatedResults.capacity = Math.round(simState.volume);
+            results.capacity.textContent = calculatedResults.capacity;
+            updateButtonStates();
+        });
+
+        startVoidingBtn.addEventListener('click', () => {
+            simState.isVoiding = true;
+            simState.isPaused = false;
+            simState.lastTime = performance.now();
+            if (calculatedResults.capacity === 0) {
+                 calculatedResults.capacity = Math.round(simState.volume);
+                 results.capacity.textContent = calculatedResults.capacity;
+            }
+            updateButtonStates();
+        });
+
+        resetBtn.addEventListener('click', resetSimulation);
+        coughBtn.addEventListener('click', () => { simState.coughTime = 0; });
+        
+        Object.entries(sensationBtns).forEach(([key, btn]) => {
+            btn.addEventListener('click', () => {
+                if(simState.isFilling) {
+                    simState.sensationEvents.push({ type: key, volume: simState.volume, time: simState.time });
+                    btn.style.fontWeight = 'bold';
+                    // Do not disable after one click to allow marking again if needed
+                }
+            });
+        });
+
+
+        // --- SIMULATION PHYSICS ---
+        function updateState(dt) {
+            simState.time += dt;
+
+            // Baseline abdominal pressure and EMG with some noise
+            simState.pAbd = 15 + Math.sin(simState.time * 0.5) * 2;
+            simState.emg = 10 + Math.sin(simState.time * 2) * 2; // Tonic activity
+
+            if (simState.isFilling) {
+                simState.volume += simState.fillingRate * dt;
+                // Bladder compliance model: pressure increases with volume
+                simState.pDet = 5 + (simState.volume / 600) * 15; 
+            }
+
+            if (simState.isVoiding && simState.volume > 0) {
+                // Detrusor contraction model
+                const voidingProgress = (calculatedResults.capacity - simState.volume) / calculatedResults.capacity;
+                simState.pDet = 5 + Math.sin(voidingProgress * Math.PI) * 55; // Bell curve for pDet
+                
+                // Flow model based on detrusor pressure
+                simState.flow = Math.max(0, (simState.pDet - 20) * 0.5); // Simple relation
+                simState.volume -= simState.flow * dt;
+                
+                // EMG relaxation during voiding
+                simState.emg = 2 + Math.sin(voidingProgress * Math.PI) * 2;
+
+
+                // Track Qmax
+                if (simState.flow > calculatedResults.qmax) {
+                    calculatedResults.qmax = simState.flow;
+                    calculatedResults.pdet_qmax = simState.pDet;
+                }
+            } else if (simState.isVoiding && simState.volume <= 0) {
+                // End of voiding
+                simState.isVoiding = false;
+                simState.isPaused = true;
+                simState.volume = 0;
+                simState.flow = 0;
+                simState.pDet = 5;
+                
+                results.qmax.textContent = calculatedResults.qmax.toFixed(1);
+                results.pdet_qmax.textContent = calculatedResults.pdet_qmax.toFixed(1);
+                results.pvr.textContent = '0'; // Assuming complete voiding
+                updateButtonStates();
+            }
+
+            // Cough simulation
+            if (simState.coughTime >= 0 && simState.coughTime < 0.5) {
+                const coughEffect = Math.sin((simState.coughTime / 0.5) * Math.PI);
+                simState.pAbd += coughEffect * 60;
+                simState.emg += coughEffect * 80; // EMG spike with cough
+                simState.coughTime += dt;
+            } else {
+                simState.coughTime = -1;
+            }
+
+            const pVes = simState.pAbd + simState.pDet;
+            
+            // Store data for charting
+            chartData.volume.push({x: simState.time, y: simState.volume});
+            chartData.pVes.push({x: simState.time, y: pVes});
+            chartData.pAbd.push({x: simState.time, y: simState.pAbd});
+            chartData.pDet.push({x: simState.time, y: simState.pDet});
+            chartData.flow.push({x: simState.time, y: simState.flow});
+            chartData.emg.push({x: simState.time, y: simState.emg});
+        }
+
+        // --- CANVAS DRAWING ---
+        function drawChart() {
+            const { padding } = chartConfig;
+            const width = canvas.width;
+            const height = canvas.height;
+            const plotWidth = width - padding * 2.5; // Adjusted for 4th axis
+            const plotHeight = height - padding * 1.5;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw grid lines and axes
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 10; i++) {
+                const y = padding + (i / 10) * plotHeight;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(padding + plotWidth, y);
+                ctx.stroke();
+            }
+
+            // Draw Y-axes labels
+            ctx.font = '12px Inter';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 10; i++) {
+                const y = padding + (i / 10) * plotHeight;
+                chartConfig.yAxes.forEach((axis, axisIndex) => {
+                    const val = axis.max * (1 - i / 10);
+                    ctx.fillStyle = axis.color;
+                    ctx.fillText(val.toFixed(0), padding - 10 - (axisIndex * 60), y + 4);
+                });
+            }
+            
+            // Draw X-axis (Time)
+            const maxTime = Math.max(60, simState.time);
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#4A5568';
+            for (let i = 0; i <= 10; i++) {
+                const x = padding + (i / 10) * plotWidth;
+                const timeLabel = (maxTime / 10) * i;
+                ctx.fillText(timeLabel.toFixed(0) + 's', x, height - padding / 2);
+            }
+
+            // Draw data lines
+            chartConfig.channels.forEach(channel => {
+                const data = chartData[channel.key];
+                if (data.length < 2) return;
+
+                const yAxis = chartConfig.yAxes[channel.yAxis];
+                ctx.strokeStyle = channel.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                const firstPoint = data[0];
+                const startX = padding + (firstPoint.x / maxTime) * plotWidth;
+                const startY = padding + (1 - firstPoint.y / yAxis.max) * plotHeight;
+                ctx.moveTo(startX, startY);
+
+                for (let i = 1; i < data.length; i++) {
+                    const point = data[i];
+                    const x = padding + (point.x / maxTime) * plotWidth;
+                    const y = padding + (1 - point.y / yAxis.max) * plotHeight;
+                    ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            });
+            
+            // Draw sensation event markers
+            ctx.font = 'bold 12px Inter';
+            simState.sensationEvents.forEach(event => {
+                const x = padding + (event.time / maxTime) * plotWidth;
+                ctx.fillStyle = '#63b3ed';
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, padding + plotHeight);
+                ctx.stroke();
+                ctx.fillText(event.type[0].toUpperCase(), x, padding - 5);
+            });
+
+            // Draw Legend
+            ctx.textAlign = 'left';
+            let legendX = padding;
+            chartConfig.channels.forEach(channel => {
+                ctx.fillStyle = channel.color;
+                const text = `${channel.key.toUpperCase()}`;
+                ctx.fillRect(legendX, height - 25, 15, 10);
+                ctx.fillText(text, legendX + 20, height - 15);
+                legendX += ctx.measureText(text).width + 45;
+            });
+        }
+
+        // --- MAIN GAME LOOP ---
+        function gameLoop(timestamp) {
+            if (simState.isPaused) return;
+
+            const dt = (timestamp - simState.lastTime) / 1000; // delta time in seconds
+            simState.lastTime = timestamp;
+
+            updateState(dt);
+            drawChart();
+
+            if (simState.isFilling || simState.isVoiding) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // --- INITIALIZATION ---
+        function init() {
+            const container = canvas.parentElement;
+            const dpr = window.devicePixelRatio || 1;
+            const rect = container.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = (rect.width * 0.6) * dpr; // Maintain aspect ratio
+            ctx.scale(dpr, dpr);
+            canvas.style.width = `${rect.width}px`;
+            canvas.style.height = `${rect.width * 0.6}px`;
+
+            resetSimulation();
+        }
+        
+        // --- SVG DIAGRAM INTERACTIVITY ---
+        const svgDescriptions = {
+            'commode': { title: 'Urodynamics Commode', text: 'A specialized chair with a built-in collection system and uroflowmeter sensor.' },
+            'uroflowmeter': { title: 'Uroflowmeter', text: 'A sensor that measures the volume of urine voided over time to calculate the flow rate (Qmax).' },
+            'bladder-catheter': { title: 'Vesical Pressure Catheter', text: 'A dual-lumen catheter to fill the bladder and measure intravesical pressure (Pves).' },
+            'rectal-catheter': { title: 'Abdominal Pressure Catheter', text: 'Measures abdominal pressure (Pabd), a surrogate for intra-abdominal pressure.' },
+            'emg-wire': { title: 'EMG Electrodes', text: 'Surface patch electrodes placed on the perineum to measure electrical activity of the external urethral sphincter.' },
+            'saline-bag': { title: 'Saline Bag', text: 'Contains sterile saline to fill the bladder at a controlled rate.' },
+            'infusion-pump': { title: 'Infusion Pump', text: 'Ensures the bladder is filled at a precise, constant rate.' },
+            'transducers': { title: 'Pressure Transducers', text: 'Convert physical fluid pressure from catheters into digital electrical signals.' },
+            'monitor': { title: 'Urodynamics Monitor', text: 'The central computer that records, displays, and analyzes all data channels in real-time.' }
+        };
+        const tooltip = document.getElementById('tooltip');
+        const svgContainer = document.getElementById('urodynamics-container');
+        document.querySelectorAll('.interactive-svg').forEach(elem => {
+            elem.addEventListener('mouseover', (event) => {
+                const id = event.target.id;
+                if (svgDescriptions[id]) {
+                    tooltip.innerHTML = `<strong>${svgDescriptions[id].title}</strong>${svgDescriptions[id].text}`;
+                    tooltip.style.display = 'block';
+                }
+            });
+            elem.addEventListener('mousemove', (event) => {
+                const rect = svgContainer.getBoundingClientRect();
+                tooltip.style.left = `${event.clientX - rect.left + 15}px`;
+                tooltip.style.top = `${event.clientY - rect.top + 15}px`;
+            });
+            elem.addEventListener('mouseout', () => {
+                tooltip.style.display = 'none';
+            });
+        });
+
+        window.addEventListener('resize', init);
+        init();
+    });
+    </script>
+</body>
+</html>
